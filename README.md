@@ -32,6 +32,7 @@
 - [x] 添加了对[Mountify](https://github.com/backslashxx/mountify)模块的支持
 - [x] 加入Re:Kernel支持，与Freezer，NoActive等软件配合降低功耗
 - [x] 加入[内核防格基带保护(By @showdo)](https://github.com/vc-teahouse/Baseband-guard)，有效防止恶意格机脚本/程序对系统分区数据的破坏
+- [x] 集成 [NoMount](https://github.com/maxsteeel/nomount) 无挂载路径重定向内核支持（可选，构建时通过 `nomount_enable` 开启，需配合 NoMount 用户态模块）
 ## 待实现：
 - [ ] zram内置化，无需外置zram.ko挂载 ~~（有了新版 lz4&zstd 补丁真的还有必要吗）~~
 - [ ] Nethunter 网卡监听模式支持
@@ -41,6 +42,16 @@
 ##### 
 ##### 
 ##### 
+## NoMount 内核支持
+
+仓库内置 [maxsteeel/nomount](https://github.com/maxsteeel/nomount) 内核补丁的移植版本，位于 [`nomount_patch/`](nomount_patch/README.md)，可把 NoMount 路径重定向子系统直接编进内核（上游 v22，已适配 6.1 / 6.12）：
+
+- **GitHub Actions**：构建时勾选 `nomount_enable` 输入（默认开启）。
+- **本地脚本**：`local/builder_*.sh` 中的 `NoMount 内核支持` 提示（默认 `y`），产物文件名带 `-nomount` 后缀。
+- **手动**：`sh nomount_patch/apply_nomount.sh <内核源码根目录>`，再向 defconfig 追加 `CONFIG_NOMOUNT=y`。
+
+补丁只提供内核侧能力，实际使用需要在设备上安装 NoMount 用户态模块（metamodule）；可与 KernelSU / SUSFS 等共存。
+
 ## 鸣谢
 - WildKernel的一加系列内核构建脚本：[WildKernels/OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS)
 - ReSukiSU：[ReSukiSU/ReSukiSU](https://github.com/ReSukiSU/ReSukiSU)

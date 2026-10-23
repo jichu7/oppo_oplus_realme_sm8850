@@ -33,6 +33,8 @@ read -p "是否启用Re-Kernel？(y/n，默认：n): " APPLY_REKERNEL
 APPLY_REKERNEL=${APPLY_REKERNEL:-n}
 read -p "是否启用内核级基带保护？(y/n，默认：y): " APPLY_BBG
 APPLY_BBG=${APPLY_BBG:-y}
+read -p "是否集成 NoMount 内核支持(可隐藏模块挂载痕迹, 需配合 NoMount 用户态模块; y/n, 默认y): " APPLY_NOMOUNT
+APPLY_NOMOUNT=${APPLY_NOMOUNT:-y}
 
 if [[ "$KSU_BRANCH" == "y" || "$KSU_BRANCH" == "Y" ]]; then
   KSU_TYPE="SukiSU Ultra"
@@ -61,6 +63,7 @@ echo "应用 Droidspaces 容器支持: $APPLY_DROIDSPACES"
 echo "启用ADIOS调度器: $APPLY_ADIOS"
 echo "启用Re-Kernel: $APPLY_REKERNEL"
 echo "启用内核级基带保护: $APPLY_BBG"
+echo "NoMount 支持: $APPLY_NOMOUNT"
 echo "===================="
 echo
 
@@ -206,6 +209,22 @@ if [[ "$APPLY_LZ4KD" == "y" || "$APPLY_LZ4KD" == "Y" ]]; then
 else
   echo ">>> 跳过 LZ4KD 补丁..."
   cd "$WORKDIR/kernel_workspace"
+fi
+
+# ===== NoMount 内核支持 =====
+if [[ "$APPLY_NOMOUNT" == "y" || "$APPLY_NOMOUNT" == "Y" ]]; then
+  echo ">>> 集成 NoMount 内核支持..."
+  cd "$WORKDIR/kernel_workspace"
+  NOMOUNT_APPLY="$SCRIPT_DIR/../nomount_patch/apply_nomount.sh"
+  if [ ! -f "$NOMOUNT_APPLY" ]; then
+    echo ">>> 未找到 $NOMOUNT_APPLY ，请确认在仓库内运行本脚本 (local/ 的上级目录需包含 nomount_patch/)" >&2
+    exit 1
+  fi
+  sh "$NOMOUNT_APPLY" ./common
+  echo "CONFIG_NOMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+  echo ">>> NoMount 集成完成"
+else
+  echo ">>> 跳过 NoMount 集成"
 fi
 
 # ===== 添加 defconfig 配置项 =====
@@ -515,6 +534,9 @@ if [[ "$APPLY_REKERNEL" == "y" || "$APPLY_REKERNEL" == "Y" ]]; then
 fi
 if [[ "$APPLY_BBG" == "y" || "$APPLY_BBG" == "Y" ]]; then
   ZIP_NAME="${ZIP_NAME}-bbg"
+fi
+if [[ "$APPLY_NOMOUNT" == "y" || "$APPLY_NOMOUNT" == "Y" ]]; then
+  ZIP_NAME="${ZIP_NAME}-nomount"
 fi
 
 ZIP_NAME="${ZIP_NAME}-v$(date +%Y%m%d).zip"
