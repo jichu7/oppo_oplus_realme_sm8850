@@ -9,6 +9,7 @@
 #   - ksu_ref      KernelSU       默认 v3.3.0
 #   - ksunext_ref  KernelSU-Next  默认 v3.4.0-legacy
 #   - ksunext_repo KernelSU-Next 来源仓库：官方 / pershoot（pershoot 的 dev-susfs 分支才带 KSU 侧 SUSFS）
+#   - finasu_ref   FinaSU          默认 v1.3.0（FinaSU 源码位于 LyraVoid/FinaSU 的 dev 分支）
 #
 # 实现方式：在 runner 的临时目录里复制一份 local/builder_<ver>.sh，
 #           用内联脚本去掉交互提示、写入固定版本逻辑，再直接执行该副本。
@@ -17,7 +18,7 @@
 #           不会像 setup.sh 那样静默回退到默认分支。
 #
 # 用法：Actions -> "临时 SUSFS 全版本构建验证" -> Run workflow，
-#       ksu_type 依次选 bakasu / ksu / ksunext 各跑一次。
+#       ksu_type 依次选 bakasu / finasu / ksu / ksunext 各跑一次。
 # 产物：每个版本一个 AnyKernel3 zip + build.log（构建失败时也可下载日志）。
 # ============================================================
 name: 临时 SUSFS 全版本构建验证
@@ -26,12 +27,13 @@ on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: 'KSU 分支（bakasu=BakaSU, ksu=KernelSU, ksunext=KernelSU-Next）'
+        description: 'KSU 分支（bakasu=BakaSU, finasu=FinaSU, ksu=KernelSU, ksunext=KernelSU-Next）'
         required: true
         type: choice
         default: 'bakasu'
         options:
           - bakasu
+          - finasu
           - ksu
           - ksunext
       bakasu_ref:
@@ -49,6 +51,11 @@ on:
         required: false
         type: string
         default: 'v3.4.0-legacy'
+      finasu_ref:
+        description: 'FinaSU 固定版本（Tag 或 SHA；仅 ksu_type=finasu 时生效）'
+        required: false
+        type: string
+        default: 'v1.3.0'
       ksunext_repo:
         description: 'KernelSU-Next 来源仓库（pershoot 的 dev-susfs 才带 KSU 侧 SUSFS 支持）'
         required: false
@@ -98,6 +105,7 @@ jobs:
           KSU_REF: ${{ inputs.ksu_ref }}
           KSUNEXT_REF: ${{ inputs.ksunext_ref }}
           KSUNEXT_REPO: ${{ inputs.ksunext_repo }}
+          FINASU_REF: ${{ inputs.finasu_ref }}
         run: |
           set -euo pipefail
 
@@ -105,6 +113,7 @@ jobs:
             bakasu)  KSU=r; REF="$BAKASU_REF" ;;
             ksunext) KSU=n; REF="$KSUNEXT_REF" ;;
             ksu)     KSU=k; REF="$KSU_REF" ;;
+            finasu)  KSU=f; REF="$FINASU_REF" ;;
             *) echo "未知 KSU 类型: $KSU_TYPE"; exit 1 ;;
           esac
 
@@ -200,6 +209,12 @@ jobs:
                   out.append('  nm_pin KernelSU-Next "KernelSU-Next" || exit 1\n')
                   continue
 
+              # FinaSU：setup.sh 按固定版本拉取（FINASU_REF 由工作流传入），随后 nm_pin 切换并校验
+              if 'LyraVoid/FinaSU' in ln and 'kernel/setup.sh' in ln:
+                  out.append(ln)
+                  out.append('  nm_pin FinaSU "FinaSU" || exit 1\n')
+                  continue
+
               # KernelSU (tiann)：setup.sh 按固定版本拉取，随后 nm_pin 切换并校验
               if 'tiann/KernelSU/refs/heads/main/kernel/setup.sh' in ln:
                   new = ln.replace('tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main',
@@ -240,6 +255,7 @@ jobs:
             REF="$REF" \
             REF_KIND="$REF_KIND" \
             KSUNEXT_REPO="$KSUNEXT_REPO" \
+            FINASU_REF="$REF" \
             KSU_BRANCH="$KSU" \
             CUSTOM_SUFFIX="tmp-susfs-${VERSION}" \
             APPLY_SUSFS=y \
