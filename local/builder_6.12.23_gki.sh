@@ -158,6 +158,9 @@ elif [[ "$KSU_BRANCH" == "f" || "$KSU_BRANCH" == "F" ]]; then
   echo ">>> 拉取 FinaSU 并设置版本..."
   FINASU_REF="${FINASU_REF:-dev}"
   curl -LSs "https://raw.githubusercontent.com/LyraVoid/FinaSU/${FINASU_REF}/kernel/setup.sh" | bash -s "${FINASU_REF}"
+  # FinaSU 的 Kbuild 只在当前目录生效，kbuild 会重置子目录的 ccflags-y，这里统一改成 subdir-ccflags-y
+  sed -i 's/^ccflags-y +=/subdir-ccflags-y +=/' ./FinaSU/kernel/Kbuild
+  echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include' >> ./FinaSU/kernel/Kbuild
   cd ./FinaSU
   KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 30000)
   echo "[+] FinaSU 版本: $(git rev-parse HEAD) (KSU_VERSION=$KSU_VERSION)"
