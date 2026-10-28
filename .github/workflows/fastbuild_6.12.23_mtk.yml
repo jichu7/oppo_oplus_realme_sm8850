@@ -101,6 +101,30 @@ on:
         type: string
         default: ''
 
+      bakasu_ref:
+        description: 'BakaSU 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 main 的最新代码)'
+        required: false
+        type: string
+        default: ''
+      ksu_ref:
+        description: 'KernelSU 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 main 的最新代码)'
+        required: false
+        type: string
+        default: ''
+      ksunext_repo:
+        description: 'KernelSU Next 源码仓库(选官方仓库时请把 ksunext_ref 填成 v3.4.0-legacy 这类 Tag, 官方仓库无 dev-susfs 分支)'
+        required: false
+        type: choice
+        default: 'pershoot/KernelSU-Next'
+        options:
+          - 'pershoot/KernelSU-Next'
+          - 'KernelSU-Next/KernelSU-Next'
+      ksunext_ref:
+        description: 'KernelSU Next 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 dev-susfs 的最新代码)'
+        required: false
+        type: string
+        default: ''
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -257,12 +281,51 @@ jobs:
 
       - name: 添加KernelSU
         id: ksu_version
+        env:
+          BAKASU_REF_IN: ${{ github.event.inputs.bakasu_ref }}
+          KSU_REF_IN: ${{ github.event.inputs.ksu_ref }}
+          KSUNEXT_REPO_IN: ${{ github.event.inputs.ksunext_repo }}
+          KSUNEXT_REF_IN: ${{ github.event.inputs.ksunext_ref }}
         run: |
           # 进入内核工作目录
           cd kernel_workspace
+          # 将 KernelSU 系列仓库固定到指定 Tag / Commit SHA(留空则保持原有默认分支行为)
+          pin_ksu() {
+            p_dir="$1"; p_name="$2"; p_ref="$3"
+            if [ -z "$p_ref" ]; then return 0; fi
+            if ! printf '%s' "$p_ref" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+              echo "[-] $p_name 版本号含非法字符: $p_ref"
+              return 1
+            fi
+            git -C "$p_dir" fetch -q --unshallow origin 2>/dev/null || true
+            if printf '%s' "$p_ref" | grep -Eq '^[0-9a-f]{7,40}$'; then
+              if git -C "$p_dir" fetch -q origin "$p_ref" 2>/dev/null; then
+                git -C "$p_dir" checkout -q FETCH_HEAD
+              elif git -C "$p_dir" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' 2>/dev/null && git -C "$p_dir" rev-parse --verify -q "${p_ref}^{commit}" >/dev/null 2>&1; then
+                git -C "$p_dir" checkout -q "${p_ref}^{commit}"
+              else
+                echo "[-] $p_name 本地找不到 SHA: $p_ref"
+                return 1
+              fi
+              p_head=$(git -C "$p_dir" rev-parse HEAD)
+              case "$p_head" in "$p_ref"*) ;; *) echo "[-] $p_name SHA 校验失败: $p_ref != $p_head"; return 1 ;; esac
+            else
+              if ! git -C "$p_dir" fetch -q origin "+refs/tags/$p_ref:refs/tags/$p_ref" 2>/dev/null; then
+                echo "[-] $p_name 固定 Tag 拉取失败: $p_ref"
+                return 1
+              fi
+              git -C "$p_dir" checkout -q "refs/tags/$p_ref" || { echo "[-] $p_name Tag 检出失败: $p_ref"; return 1; }
+              p_head=$(git -C "$p_dir" rev-parse HEAD)
+              p_tag=$(git -C "$p_dir" rev-parse "refs/tags/$p_ref^{commit}")
+              if [ "$p_head" != "$p_tag" ]; then echo "[-] $p_name Tag 校验失败: $p_ref"; return 1; fi
+            fi
+            echo "[+] $p_name 已固定到 $p_ref -> $p_head"
+          }
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" || ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             echo "正在配置BakaSU（由于SukiSU长期未维护无法正常编译，且BakaSU兼容sukisu管理器，故SukiSU源码仓库已重定向为bakasu）..."
-            curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
+            BAKASU_REF="${BAKASU_REF_IN:-main}"
+            curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${BAKASU_REF}/kernel/setup.sh" | bash -s "${BAKASU_REF}" || { echo "[-] BakaSU 安装脚本执行失败: ${BAKASU_REF}"; exit 1; }
+            pin_ksu ./KernelSU "BakaSU" "${BAKASU_REF_IN}"
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
             cd ./KernelSU
             # 生成自定义版本号（基于提交计数）, 失败时使用 114514
@@ -272,14 +335,21 @@ jobs:
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             echo "正在配置KernelSU Next..."
-            curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+            KSUNEXT_REPO="${KSUNEXT_REPO_IN:-pershoot/KernelSU-Next}"
+            KSUNEXT_REF="${KSUNEXT_REF_IN:-dev-susfs}"
+            curl -LSs "https://raw.githubusercontent.com/${KSUNEXT_REPO}/${KSUNEXT_REF}/kernel/setup.sh" | bash -s "${KSUNEXT_REF}" || { echo "[-] KernelSU Next 安装脚本执行失败: ${KSUNEXT_REPO}@${KSUNEXT_REF}"; exit 1; }
+            pin_ksu ./KernelSU-Next "KernelSU Next" "${KSUNEXT_REF_IN}"
             cd KernelSU-Next
             rm -rf .git
             KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/pershoot/KernelSU-Next/commits?sha=dev&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
             sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := $KSU_VERSION/g" kernel/Kbuild
-            KSU_GIT_TAG=$(curl -sL "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" | grep -o '"name": *"[^"]*"' | head -n 1 | sed 's/"name": "//;s/"//')
+            if printf '%s' "${KSUNEXT_REF_IN}" | grep -Eq '^v[0-9]'; then
+              KSU_GIT_TAG="${KSUNEXT_REF_IN}"
+            else
+              KSU_GIT_TAG=$(curl -sL "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" | grep -o '"name": *"[^"]*"' | head -n 1 | sed 's/"name": "//;s/"//')
+            fi
             sed -i "s/KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := $KSU_GIT_TAG/g" kernel/Kbuild
             #为KernelSU Next添加WildKSU管理器支持
             cd ../common/drivers/kernelsu
@@ -287,7 +357,9 @@ jobs:
             patch -p2 -N -F 3 < apk_sign.patch || true
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
             echo "正在配置原版 KernelSU (tiann/KernelSU)..."
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
+            KSU_REF="${KSU_REF_IN:-main}"
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/${KSU_REF}/kernel/setup.sh" | bash -s "${KSU_REF}" || { echo "[-] KernelSU 安装脚本执行失败: ${KSU_REF}"; exit 1; }
+            pin_ksu ./KernelSU "KernelSU" "${KSU_REF_IN}"
             cd ./KernelSU
             KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/tiann/KernelSU/commits?sha=main&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV

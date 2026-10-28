@@ -1,0 +1,267 @@
+# ============================================================
+# 临时 SUSFS 全版本构建验证工作流（不修改仓库内任何已有文件）
+#
+# 目的：一次性验证本仓库「所有内核版本 + SUSFS 全开」能否成功构建，
+#       同时支持把 KernelSU 拉取版本固定到指定的 Tag 或 SHA。
+#
+# 固定版本规则（每个输入都接受 Tag 或 SHA，自动识别）：
+#   - bakasu_ref   BakaSU         默认 1bfed00f597e65700d70fee0feb1d424fc21a2e5
+#   - ksu_ref      KernelSU       默认 v3.3.0
+#   - ksunext_ref  KernelSU-Next  默认 v3.4.0-legacy
+#   - ksunext_repo KernelSU-Next 来源仓库：官方 / pershoot（pershoot 的 dev-susfs 分支才带 KSU 侧 SUSFS）
+#
+# 实现方式：在 runner 的临时目录里复制一份 local/builder_<ver>.sh，
+#           用内联脚本去掉交互提示、写入固定版本逻辑，再直接执行该副本。
+#           仓库中的 14 个 fastbuild_*.yml 与 local/builder_*.sh 保持原样。
+#           固定版本会做「拉取 -> 切换 -> 校验」三步，校验不通过即失败，
+#           不会像 setup.sh 那样静默回退到默认分支。
+#
+# 用法：Actions -> "临时 SUSFS 全版本构建验证" -> Run workflow，
+#       ksu_type 依次选 bakasu / ksu / ksunext 各跑一次。
+# 产物：每个版本一个 AnyKernel3 zip + build.log（构建失败时也可下载日志）。
+# ============================================================
+name: 临时 SUSFS 全版本构建验证
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_type:
+        description: 'KSU 分支（bakasu=BakaSU, ksu=KernelSU, ksunext=KernelSU-Next）'
+        required: true
+        type: choice
+        default: 'bakasu'
+        options:
+          - bakasu
+          - ksu
+          - ksunext
+      bakasu_ref:
+        description: 'BakaSU 固定版本（Tag 或 SHA；仅 ksu_type=bakasu 时生效）'
+        required: false
+        type: string
+        default: '1bfed00f597e65700d70fee0feb1d424fc21a2e5'
+      ksu_ref:
+        description: 'KernelSU 固定版本（Tag 或 SHA；仅 ksu_type=ksu 时生效）'
+        required: false
+        type: string
+        default: 'v3.3.0'
+      ksunext_ref:
+        description: 'KernelSU-Next 固定版本（Tag 或 SHA；仅 ksu_type=ksunext 时生效）'
+        required: false
+        type: string
+        default: 'v3.4.0-legacy'
+      ksunext_repo:
+        description: 'KernelSU-Next 来源仓库（pershoot 的 dev-susfs 才带 KSU 侧 SUSFS 支持）'
+        required: false
+        type: choice
+        default: 'KernelSU-Next/KernelSU-Next'
+        options:
+          - KernelSU-Next/KernelSU-Next
+          - pershoot/KernelSU-Next
+
+concurrency:
+  group: temp-susfs-${{ github.ref }}-${{ inputs.ksu_type }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.builder }} (${{ inputs.ksu_type }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        builder:
+          - builder_6.12.23.sh
+          - builder_6.12.23_gki.sh
+          - builder_6.12.23_mtk.sh
+          - builder_6.12.38.sh
+          - builder_6.12.58.sh
+          - builder_6.12.58_mtk.sh
+          - builder_6.12.69_gki.sh
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v5
+
+      - name: 安装基础依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends aria2 zip unzip zstd
+
+      - name: 生成临时构建脚本（固定 Tag/SHA、关闭交互）并编译
+        env:
+          BUILDER: ${{ matrix.builder }}
+          KSU_TYPE: ${{ inputs.ksu_type }}
+          BAKASU_REF: ${{ inputs.bakasu_ref }}
+          KSU_REF: ${{ inputs.ksu_ref }}
+          KSUNEXT_REF: ${{ inputs.ksunext_ref }}
+          KSUNEXT_REPO: ${{ inputs.ksunext_repo }}
+        run: |
+          set -euo pipefail
+
+          case "$KSU_TYPE" in
+            bakasu)  KSU=r; REF="$BAKASU_REF" ;;
+            ksunext) KSU=n; REF="$KSUNEXT_REF" ;;
+            ksu)     KSU=k; REF="$KSU_REF" ;;
+            *) echo "未知 KSU 类型: $KSU_TYPE"; exit 1 ;;
+          esac
+
+          if [ -z "$REF" ]; then
+            echo "[x] $KSU_TYPE 的固定版本为空"
+            exit 1
+          fi
+          if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "[x] 非法版本号: $REF"
+            exit 1
+          fi
+          if printf '%s' "$REF" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            REF_KIND=sha
+          else
+            REF_KIND=tag
+          fi
+          echo ">>> 固定版本: $KSU_TYPE -> $REF（识别为 $REF_KIND）"
+
+          VERSION="${BUILDER#builder_}"
+          VERSION="${VERSION%.sh}"
+          TMP_SCRIPT="local/.temp_build_${VERSION}.sh"
+
+          echo ">>> 临时构建脚本: $TMP_SCRIPT（源: local/$BUILDER，内核版本: $VERSION）"
+          cp "local/$BUILDER" "$TMP_SCRIPT"
+
+          # 复制件中：删除所有 read -p 交互提示，插入固定 Tag/SHA 的拉取与校验
+          python3 - "$TMP_SCRIPT" <<'PY'
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              lines = f.readlines()
+
+          PIN_FUNC = '''# ===== 固定 Tag/SHA 辅助函数（由临时工作流注入）=====
+          nm_pin() {
+            local d="$1" name="$2" head want full
+            git -C "$d" fetch -q --unshallow origin 2>/dev/null || true
+            if [ "$REF_KIND" = "sha" ]; then
+              if git -C "$d" fetch -q origin "$REF" 2>/dev/null; then
+                git -C "$d" checkout -q FETCH_HEAD || { echo "[x] $name 切换失败: $REF"; return 1; }
+              else
+                # 短 SHA 无法直接 fetch：拉取全部分支与 tag 后再本地解析
+                git -C "$d" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' || { echo "[x] $name 固定 SHA 拉取失败: $REF"; return 1; }
+                full="$(git -C "$d" rev-parse --verify "${REF}^{commit}" 2>/dev/null || true)"
+                [ -n "$full" ] || { echo "[x] $name 本地找不到 SHA: $REF"; return 1; }
+                git -C "$d" checkout -q "$full" || { echo "[x] $name 切换失败: $REF"; return 1; }
+              fi
+            else
+              git -C "$d" fetch -q origin "+refs/tags/$REF:refs/tags/$REF" || { echo "[x] $name 固定 Tag 拉取失败: $REF"; return 1; }
+              git -C "$d" checkout -q "refs/tags/$REF" || { echo "[x] $name 切换失败: $REF"; return 1; }
+            fi
+            head="$(git -C "$d" rev-parse HEAD 2>/dev/null || true)"
+            if [ "$REF_KIND" = "sha" ]; then
+              case "$head" in
+                "$REF"*) ;;
+                *) echo "[x] $name SHA 校验失败: 期望 $REF，实际 $head"; return 1 ;;
+              esac
+            else
+              want="$(git -C "$d" rev-parse "refs/tags/$REF^{commit}" 2>/dev/null || true)"
+              if [ -z "$want" ] || [ "$head" != "$want" ]; then
+                echo "[x] $name Tag 校验失败: $REF（期望 $want，实际 $head）"; return 1
+              fi
+            fi
+            echo "[+] $name 已固定到 $REF -> $head"
+          }
+          # ===== 固定 Tag/SHA 辅助函数结束 =====
+          '''
+
+          out = []
+          for idx, ln in enumerate(lines):
+              # 在 shebang 之后注入辅助函数
+              if idx == 0:
+                  out.append(ln)
+                  out.append(PIN_FUNC)
+                  continue
+
+              # 去掉全部交互提示，改用环境变量 + 脚本内默认值
+              if ln.startswith('read -p '):
+                  out.append('#' + ln)
+                  continue
+
+              # BakaSU：setup.sh 按固定版本拉取，随后 nm_pin 切换并校验
+              if 'Baka-SU/BakaSU/main/kernel/setup.sh' in ln:
+                  new = ln.replace('Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main',
+                                   'Baka-SU/BakaSU/$REF/kernel/setup.sh" | bash -s "$REF"')
+                  out.append(new)
+                  out.append('  nm_pin KernelSU "BakaSU" || exit 1\n')
+                  continue
+
+              # KernelSU-Next：来源仓库与版本均可配置
+              if 'pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh' in ln:
+                  out.append('  curl -LSs "https://raw.githubusercontent.com/$KSUNEXT_REPO/$REF/kernel/setup.sh" | bash -s "$REF"\n')
+                  out.append('  nm_pin KernelSU-Next "KernelSU-Next" || exit 1\n')
+                  continue
+
+              # KernelSU (tiann)：setup.sh 按固定版本拉取，随后 nm_pin 切换并校验
+              if 'tiann/KernelSU/refs/heads/main/kernel/setup.sh' in ln:
+                  new = ln.replace('tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main',
+                                   'tiann/KernelSU/$REF/kernel/setup.sh" | bash -s "$REF"')
+                  out.append(new)
+                  out.append('  nm_pin KernelSU "KernelSU" || exit 1\n')
+                  continue
+
+              # Next 的版本号原本靠 API 计算，改为固定值（其 .git 随后即被删除）
+              if 'KSU_VERSION=$(expr $(curl' in ln and 'pershoot' in ln:
+                  out.append('  KSU_VERSION=31400\n')
+                  continue
+
+              # Next 的 tag 原本取官方最新 tag，改为固定版本号
+              if 'KSU_GIT_TAG=$(curl' in ln:
+                  out.append('  KSU_GIT_TAG="$REF"\n')
+                  continue
+
+              # tiann 的版本号按固定版本计算提交数
+              if 'KSU_VERSION=$(expr $(curl' in ln and 'tiann' in ln:
+                  out.append(ln.replace('sha=main', 'sha=$REF'))
+                  continue
+
+              out.append(ln)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.writelines(out)
+          PY
+
+          if grep -q '^read -p ' "$TMP_SCRIPT"; then
+            echo "[x] 仍存在交互提示，终止"
+            exit 1
+          fi
+
+          bash -n "$TMP_SCRIPT"
+          echo ">>> 开始构建（SUSFS 开启，NoMount 开启）..."
+          sudo -E env \
+            REF="$REF" \
+            REF_KIND="$REF_KIND" \
+            KSUNEXT_REPO="$KSUNEXT_REPO" \
+            KSU_BRANCH="$KSU" \
+            CUSTOM_SUFFIX="tmp-susfs-${VERSION}" \
+            APPLY_SUSFS=y \
+            USE_PATCH_LINUX=n \
+            APPLY_LZ4=y \
+            APPLY_LZ4KD=n \
+            APPLY_BETTERNET=y \
+            APPLY_BBR=n \
+            APPLY_DROIDSPACES=n \
+            APPLY_ADIOS=y \
+            APPLY_REKERNEL=n \
+            APPLY_BBG=y \
+            APPLY_NOMOUNT=y \
+            bash "$TMP_SCRIPT"
+
+      - name: 上传构建产物
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: temp-susfs-${{ matrix.builder }}-${{ inputs.ksu_type }}
+          path: |
+            local/Anykernel3-*.zip
+            local/kernel_workspace/build.log
+          if-no-files-found: warn
+          retention-days: 7
