@@ -377,6 +377,9 @@ jobs:
             FINASU_REF="${FINASU_REF_IN:-dev}"
             curl -LSs "https://raw.githubusercontent.com/LyraVoid/FinaSU/${FINASU_REF}/kernel/setup.sh" | bash -s "${FINASU_REF}" || { echo "[-] FinaSU 安装脚本执行失败: ${FINASU_REF}"; exit 1; }
             pin_ksu ./FinaSU "FinaSU" "${FINASU_REF_IN}"
+            # FinaSU 的 Kbuild 只在当前目录生效，kbuild 会重置子目录的 ccflags-y，这里统一改成 subdir-ccflags-y
+            sed -i 's/^ccflags-y +=/subdir-ccflags-y +=/' ./FinaSU/kernel/Kbuild
+            echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include' >> ./FinaSU/kernel/Kbuild
             cd ./FinaSU
             KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 30000)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
