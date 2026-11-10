@@ -28,6 +28,11 @@ on:
         required: true
         type: boolean
         default: 'true'
+      landlock_enable:
+        description: '是否启用 Landlock LSM(进程自我沙箱机制; 默认关闭, 开启前请确认 boot 参数 lsm= 未覆盖内核配置)'
+        required: true
+        type: boolean
+        default: 'false'
       kpm_enable:
         description: '是否开启kpm(使用KpatchNext独立实现kpm(支持任意KSU/面具环境); 不需要可保持默认关闭)'
         required: true
@@ -660,6 +665,22 @@ jobs:
           curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
+      - name: 启用 Landlock LSM
+        if: inputs.landlock_enable
+        run: |
+          echo "正在启用 Landlock LSM..."
+          cd kernel_workspace
+          echo "CONFIG_SECURITY_LANDLOCK=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SECURITY_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 显式设置 LSM 顺序：Landlock 在最前，保留内核默认 LSM 列表；启用 BBG 时加入 baseband_guard
+          # 注意：SUSFS open redirect 会让 Landlock 看到重定向后的路径，避免策略路径重叠
+          if [[ "${{ inputs.baseband_guard }}" == "true" ]]; then
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,baseband_guard,smack,tomoyo,apparmor,ipe,bpf"' >> ./common/arch/arm64/configs/gki_defconfig
+          else
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,ipe,bpf"' >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+          echo "已启用 Landlock；请确认设备 boot 参数没有用 lsm= 覆盖内核配置。"
+
       - name: 添加制作名称
         run: |
           cd kernel_workspace
@@ -896,6 +917,7 @@ jobs:
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
+          echo "Landlock: ${{ github.event.inputs.landlock_enable }}" >> ./ak3.log
           echo "NoMount: ${{ github.event.inputs.nomount_enable }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
@@ -983,6 +1005,7 @@ jobs:
           - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
+          - Landlock LSM 支持：${{ github.event.inputs.landlock_enable }}
           - NoMount 无挂载路径重定向支持：${{ github.event.inputs.nomount_enable }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
           - FinaSU管理器下载：[FinaSU](https://github.com/LyraVoid/FinaSU/releases)
