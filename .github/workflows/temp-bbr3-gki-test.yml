@@ -1,0 +1,187 @@
+name: 临时诊断 BBRv3 / CAKE GKI 6.12.23
+
+# 仅用于定位开机 panic，不修改正式工作流。
+# 变体：
+#   bbrv3_nocake : BBRv3 补丁，无 CAKE，默认 cubic
+#   bbrv3_cake   : BBRv3 补丁 + CAKE 默认
+#   bbrv1_nocake : 原版 BBRv1/默认配置，无 CAKE
+#   bbrv1_cake   : BBRv1 + CAKE 默认
+#
+# 产物：AnyKernel3 zip，直接下载刷入即可。
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: '测试变体'
+        required: true
+        type: choice
+        default: 'bbrv3_nocake'
+        options:
+          - 'bbrv3_nocake'
+          - 'bbrv3_cake'
+          - 'bbrv1_nocake'
+          - 'bbrv1_cake'
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Shanghai
+  KERNEL_VERSION: '6.12'
+  SUB_VERSION: '23_gki'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: 检出仓库（获取补丁）
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex make git curl wget unzip zip \
+            python3 python-is-python3 \
+            libssl-dev libelf-dev libdw-dev dwarves \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: 下载 GKI 6.12.23 源码与 clang19 工具链
+        run: |
+          mkdir -p kernel_workspace
+          cd kernel_workspace
+
+          echo "下载 GKI 源码..."
+          curl -L --retry 3 -o common.zip \
+            https://github.com/cctv18/android_gki_kernel_common/archive/refs/heads/android16-6.12-2025-06.zip
+          unzip -q common.zip
+          mv android_gki_kernel_common-android16-6.12-2025-06 common
+          rm -f common.zip
+
+          echo "下载 clang19..."
+          mkdir -p clang19
+          curl -L --retry 3 -o clang.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/clang-r536225.zip
+          unzip -q clang.zip -d clang19
+          rm -f clang.zip
+
+          echo "下载 Rust 工具链..."
+          mkdir -p rust
+          curl -L --retry 3 -o rust.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/rust.zip
+          unzip -q rust.zip -d rust
+          rm -f rust.zip
+
+          echo "下载 build-tools..."
+          curl -L --retry 3 -o build-tools.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/build-tools.zip
+          unzip -q build-tools.zip
+          rm -f build-tools.zip
+
+          echo "源码/工具链准备完成"
+
+      - name: 应用补丁并写配置
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          set -e
+          cd kernel_workspace/common
+
+          BBR3=0
+          CAKE=0
+          DEFAULT_CC=cubic
+
+          case "$VARIANT" in
+            bbrv3_nocake) BBR3=1; CAKE=0 ;;
+            bbrv3_cake)   BBR3=1; CAKE=1 ;;
+            bbrv1_nocake) BBR3=0; CAKE=0 ;;
+            bbrv1_cake)   BBR3=0; CAKE=1 ;;
+            *) echo "未知变体: $VARIANT"; exit 1 ;;
+          esac
+
+          DEFCONFIG=arch/arm64/configs/gki_defconfig
+
+          if [ "$BBR3" = "1" ]; then
+            echo "应用 BBRv3 补丁..."
+            git apply ../../repo/other_patch/bbr3-6.12.patch
+
+            echo "CONFIG_TCP_CONG_ADVANCED=y" >> "$DEFCONFIG"
+            echo "CONFIG_TCP_CONG_BBR=y" >> "$DEFCONFIG"
+            echo "CONFIG_TCP_CONG_CUBIC=y" >> "$DEFCONFIG"
+            echo "CONFIG_DEFAULT_TCP_CONG=cubic" >> "$DEFCONFIG"
+          fi
+
+          if [ "$CAKE" = "1" ]; then
+            echo "应用 CAKE 默认 qdisc 补丁..."
+            git apply ../../repo/other_patch/cake-default-6.12.patch
+
+            echo "CONFIG_NET_SCH_CAKE=y" >> "$DEFCONFIG"
+            echo "CONFIG_NET_SCH_DEFAULT=y" >> "$DEFCONFIG"
+            echo "CONFIG_DEFAULT_CAKE=y" >> "$DEFCONFIG"
+          fi
+
+          echo "=== 实际追加的配置 ==="
+          tail -n 30 "$DEFCONFIG"
+          echo "=== BBR/CAKE 相关配置 ==="
+          grep -E 'CONFIG_(TCP_CONG|DEFAULT_TCP_CONG|NET_SCH_CAKE|NET_SCH_DEFAULT|DEFAULT_CAKE)' "$DEFCONFIG" || true
+
+      - name: 编译内核 Image
+        run: |
+          set -e
+          WORKDIR="$(pwd)"
+          cd kernel_workspace/common
+
+          export PATH="$WORKDIR/kernel_workspace/clang19/bin:$WORKDIR/kernel_workspace/build-tools/bin:$WORKDIR/kernel_workspace/rust/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export LLVM=1
+          export LLVM_IAS=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=clang
+          export LD=ld.lld
+          export HOSTCC=clang
+          export HOSTLD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export AS=clang
+          export READELF=llvm-readelf
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export OBJSIZE=llvm-size
+          export STRIP=llvm-strip
+          export RUSTC=rustc
+          export BINDGEN=bindgen
+          export LIBCLANG_PATH="$WORKDIR/kernel_workspace/clang19/lib"
+
+          source ./_setup_env.sh 2>/dev/null || true
+
+          make -j"$(nproc --all)" O=out gki_defconfig
+          make -j"$(nproc --all)" O=out Image
+
+          ls -lh out/arch/arm64/boot/Image
+
+      - name: 打包 AnyKernel3
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          set -e
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/cctv18/AnyKernel3
+          rm -rf AnyKernel3/.git
+          cd AnyKernel3
+          cp ../common/out/arch/arm64/boot/Image ./Image
+
+          ZIP_NAME="AnyKernel3_${VARIANT}_6.12.23_gki_$(date +%Y%m%d%H%M).zip"
+          echo "打包: $ZIP_NAME"
+          zip -r9 "../$ZIP_NAME" ./*
+
+      - name: 上传 AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.variant }}-anykernel3
+          path: ${{ github.workspace }}/kernel_workspace/AnyKernel3_*.zip
+          if-no-files-found: error
