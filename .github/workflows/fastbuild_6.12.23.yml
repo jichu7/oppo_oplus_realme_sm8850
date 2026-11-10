@@ -540,6 +540,11 @@ jobs:
           if [[ "${{ github.event.inputs.bbr_enable }}" != "false" ]]; then
             echo "正在添加BBR等拥塞控制算法..."
             cd kernel_workspace
+            #应用 BBRv3 补丁，将 BBRv1 升级为 BBRv3
+            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/bbr3-6.12.patch
+            cd common
+            git apply ../bbr3-6.12.patch
+            cd ..
             #开启TCP拥塞控制算法控制器（必需）
             echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
             ################################################################################################################################
