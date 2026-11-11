@@ -1,0 +1,8 @@
+# Dedicated type for /dev/ntsync.
+# Magisk supports type/typeattribute; KernelSU versions that only support
+# "allow" will skip these and the script falls back to an existing label.
+type ntsync_device
+typeattribute ntsync_device dev_type
+
+allow untrusted_app ntsync_device chr_file { open read write ioctl map getattr }
+allow su ntsync_device chr_file { open read write ioctl map getattr }

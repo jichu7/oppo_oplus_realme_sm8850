@@ -1,0 +1,6 @@
+id=ntsync_rw
+name=NTSync Global RW
+version=1.0
+versionCode=1
+author=oppo_oplus_realme_sm8850-main
+description=At boot: chmod 0666 /dev/ntsync and relabel it so proot/Wine can open it. For ROMs without vendor source.
