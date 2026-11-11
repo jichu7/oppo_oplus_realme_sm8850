@@ -75,3 +75,14 @@ Wine/Proton 需要其构建版本启用 ntsync 支持。普通 Android 应用不
 - `CONFIG_NTSYNC=y` 只是提供内核接口，不会自动给任何应用授权。
 - 如果 SELinux 报 `avc: denied { ioctl } for ... ntsync_device`，按 `audit2allow` 补齐对应域，不要直接 `setenforce 0`。
 - 如果只用 proot 且不想改 sepolicy，可把 `/dev/ntsync` 的权限放宽到 0666，但这会扩大攻击面；更推荐按域授权。
+
+## 6. 直接可合并的 vendor 策略
+
+`vendor_policy/` 下是已经整理好的 vendor 侧文件：
+
+- `ueventd.rc`
+- `file_contexts`
+- `ntsync_device.te`
+- `apply_to_vendor.sh`
+
+按 `vendor_policy/README.md` 合并到 `vendor/etc/ueventd.rc` 和 `BOARD_VENDOR_SEPOLICY_DIRS` 中的策略目录，重新编译 vendor/sepolicy 后即可让 `/dev/ntsync` 稳定为 `0666`。
