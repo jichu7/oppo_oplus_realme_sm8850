@@ -163,8 +163,15 @@ jobs:
           sudo apt-mark hold libc-bin &&
           sudo apt purge man-db &&
           sudo rm -rf /var/lib/man-db/auto-update &&
-          sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev &
+          sudo apt update || true
+          # libelf-dev 是 resolve_btfids/libbpf 的必需依赖。GitHub runner 偶发 DNS 失败，不能后台安装后直接继续。
+          for i in 1 2 3; do
+            sudo apt-get update && \
+            sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev && break
+            echo "apt 依赖安装失败，第 ${i} 次重试..."
+            sleep 10
+          done
+          test -f /usr/include/libelf.h || { echo "错误：libelf-dev 安装失败，libbpf/resolve_btfids 无法编译"; exit 1; }
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
           #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev libdw-dev zip unzip ccache
           
