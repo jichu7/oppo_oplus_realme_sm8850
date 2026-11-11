@@ -883,6 +883,23 @@ jobs:
           if [[ ${{ github.event.inputs.kpm_enable }} == 'true' ]]; then
             wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
           fi
+          if [[ "${{ github.event.inputs.ntsync_enable }}" == "true" ]]; then
+            wget -O ntsync_rw.zip https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/ntsync-android/ntsync_rw.zip
+            cat >> anykernel.sh <<'NTSYNC_EOF'
+
+          # NTSync runtime module (optional, only present when ntsync_enable=true)
+          if [ -f "$AKHOME/ntsync_rw.zip" ]; then
+              ui_print "Installing NTSync RW module..."
+              if [ -f /data/adb/ksud ]; then
+                  /data/adb/ksud module install "$AKHOME/ntsync_rw.zip"
+              elif [ -f /data/adb/magisk/magisk ]; then
+                  /data/adb/magisk/magisk --install-module "$AKHOME/ntsync_rw.zip"
+              else
+                  ui_print "! Root manager not found; install ntsync_rw.zip manually after boot."
+              fi
+          fi
+          NTSYNC_EOF
+          fi
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
           else
