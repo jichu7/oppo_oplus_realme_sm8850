@@ -33,6 +33,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      ntsync_enable:
+        description: '是否启用 NTSync(Wine/Proton 的 NT 同步内核驱动; 默认关闭; /dev/ntsync 默认 0666, 需配合 ueventd/SELinux)'
+        required: true
+        type: boolean
+        default: 'false'
       kpm_enable:
         description: '是否开启kpm(使用KpatchNext独立实现kpm(支持任意KSU/面具环境); 不需要可保持默认关闭)'
         required: true
@@ -58,7 +63,7 @@ on:
           - 'true'
           - 'default'
       droidspaces_enable:
-        description: '是否启用Droidspaces容器支持(轻量化的完整Linux容器支持;false关闭,standard开启容器+ntsync支持,extend开启更多测试支持项)'
+        description: '是否启用Droidspaces容器支持(轻量化的完整Linux容器支持;false关闭,standard开启容器支持,NTSync由ntsync_enable单独控制,extend开启更多测试支持项)'
         required: true
         type: choice
         default: 'false'
@@ -547,9 +552,12 @@ jobs:
             cd kernel_workspace
             #应用 BBRv3 补丁，将 BBRv1 升级为 BBRv3
             wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/bbr3-6.12.patch
+            #应用 BBRv3 KMI 适配补丁（保持 icsk_ca_priv=104，BBR 状态动态分配）
+            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/bbr3-6.12-kmi.patch
             wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/cake-default-6.12.patch
             cd common
             git apply ../bbr3-6.12.patch
+            git apply --ignore-whitespace ../bbr3-6.12-kmi.patch
             git apply ../cake-default-6.12.patch
             cd ..
             #开启TCP拥塞控制算法控制器（必需）
@@ -604,9 +612,6 @@ jobs:
             # 修补 oplus_bsp_sched_assist 数组越界访问导致的运行随机崩溃
             wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/droidspaces_patch/ddl_hit_hook.patch
             patch -p1 -F 3 < ddl_hit_hook.patch || true
-            # 应用 NTSync 补丁
-            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/droidspaces_patch/ntsync_compat_${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch
-            patch -p1 -F 3 < ntsync_compat_${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             # 开启 Droidspaces 容器所需内核支持
             echo "CONFIG_PID_NS=y" >> ./arch/arm64/configs/gki_defconfig
             echo "CONFIG_IPC_NS=y" >> ./arch/arm64/configs/gki_defconfig
@@ -624,8 +629,6 @@ jobs:
             #echo "CONFIG_FW_LOADER_COMPRESS=y" >> ./arch/arm64/configs/gki_defconfig
             #echo "CONFIG_BRIDGE_NETFILTER=y" >> ./arch/arm64/configs/gki_defconfig
             #echo "CONFIG_NF_TABLES=y" >> ./arch/arm64/configs/gki_defconfig
-            # 开启 NTSync
-            echo "CONFIG_NTSYNC=y" >> ./arch/arm64/configs/gki_defconfig
             if [[ "${{ github.event.inputs.droidspaces_enable }}" == "extend" ]]; then
               echo "正在启用容器环境扩展支持..."
               # 开启虚拟 HCI 设备支持
@@ -680,6 +683,18 @@ jobs:
             echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,ipe,bpf"' >> ./common/arch/arm64/configs/gki_defconfig
           fi
           echo "已启用 Landlock；请确认设备 boot 参数没有用 lsm= 覆盖内核配置。"
+
+      - name: 启用 NTSync
+        if: inputs.ntsync_enable
+        run: |
+          echo "正在启用 NTSync..."
+          cd kernel_workspace
+          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/ntsync-6.14.patch
+          cd common
+          git -c core.autocrlf=false apply --whitespace=nowarn ../ntsync-6.14.patch
+          cd ..
+          echo "CONFIG_NTSYNC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "已启用 NTSync；/dev/ntsync 默认 0666，Android 侧需配置 ueventd/SELinux。"
 
       - name: 添加制作名称
         run: |
@@ -918,6 +933,7 @@ jobs:
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
           echo "Landlock: ${{ github.event.inputs.landlock_enable }}" >> ./ak3.log
+          echo "NTSync: ${{ github.event.inputs.ntsync_enable }}" >> ./ak3.log
           echo "NoMount: ${{ github.event.inputs.nomount_enable }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
@@ -1006,6 +1022,7 @@ jobs:
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
           - Landlock LSM 支持：${{ github.event.inputs.landlock_enable }}
+          - NTSync 支持：${{ github.event.inputs.ntsync_enable }}
           - NoMount 无挂载路径重定向支持：${{ github.event.inputs.nomount_enable }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
           - FinaSU管理器下载：[FinaSU](https://github.com/LyraVoid/FinaSU/releases)
