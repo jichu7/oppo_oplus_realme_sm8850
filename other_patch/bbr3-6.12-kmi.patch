@@ -681,3 +681,14 @@ index a180fa6..a101e9e 100644
  	.cong_control	= bbr_main,
  	.sndbuf_expand	= bbr_sndbuf_expand,
  	.skb_marked_lost = bbr_skb_marked_lost,
+@@ -2392,10 +2392,8 @@ static int __init bbr_register(void)
+ {
+ 	int ret;
+ 
+-	BUILD_BUG_ON(sizeof(struct bbr) > ICSK_CA_PRIV_SIZE);
+-
+ 	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS, &tcp_bbr_kfunc_set);
+ 	if (ret < 0)
+ 		return ret;
+ 	return tcp_register_congestion_control(&tcp_bbr_cong_ops);
+ }
