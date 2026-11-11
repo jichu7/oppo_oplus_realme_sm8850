@@ -1,0 +1,7 @@
+type ntsync_device, dev_type;
+
+# proot/chroot 里的 Wine 仍以普通应用 uid 运行，因此需要 appdomain 权限。
+allow appdomain ntsync_device:chr_file { open read write ioctl map };
+
+# KernelSU / root 场景。
+allow su ntsync_device:chr_file { open read write ioctl map };
