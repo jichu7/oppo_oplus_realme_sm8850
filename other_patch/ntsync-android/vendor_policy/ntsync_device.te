@@ -2,6 +2,8 @@ type ntsync_device, dev_type;
 
 # proot/chroot/Wine 以普通应用 uid 运行。
 allow untrusted_app ntsync_device:chr_file { open read write ioctl map getattr };
+# Android 11+ 的普通应用常运行在带 SDK 后缀的域，例如 untrusted_app_27。
+allow untrusted_app_27 ntsync_device:chr_file { open read write ioctl map getattr };
 
 # KernelSU / root 场景。
 allow su ntsync_device:chr_file { open read write ioctl map getattr };

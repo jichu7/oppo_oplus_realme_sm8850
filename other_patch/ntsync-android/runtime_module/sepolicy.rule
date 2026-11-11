@@ -1,0 +1,11 @@
+# Dedicated type for /dev/ntsync.
+# Magisk supports type/typeattribute; KernelSU versions that only support
+# "allow" will skip these and the script falls back to an existing label.
+type ntsync_device
+typeattribute ntsync_device dev_type
+
+allow untrusted_app ntsync_device chr_file { open read write ioctl map getattr }
+# Android 11+ 的普通应用通常运行在带 SDK 后缀的域里（例如 untrusted_app_27）。
+# 只写 untrusted_app 不会覆盖这些域，MT Manager 等应用仍会被拒绝 getattr。
+allow untrusted_app_27 ntsync_device chr_file { open read write ioctl map getattr }
+allow su ntsync_device chr_file { open read write ioctl map getattr }
