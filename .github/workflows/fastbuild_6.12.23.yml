@@ -164,6 +164,16 @@ jobs:
           sudo apt purge man-db &&
           sudo rm -rf /var/lib/man-db/auto-update &&
           sudo apt update || true
+          # GitHub 的 Ubuntu 镜像偶尔整体 DNS 故障；优先切到官方 archive，避免 azure 镜像挂掉导致依赖装不上。
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g; s|security\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g; s|security\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g; s|security\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list
+          fi
           # libelf-dev 是 resolve_btfids/libbpf 的必需依赖。GitHub runner 偶发 DNS 失败，不能后台安装后直接继续。
           for i in 1 2 3; do
             sudo apt-get update && \
