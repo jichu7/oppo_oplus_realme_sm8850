@@ -1,0 +1,13 @@
+type ntsync_device, dev_type;
+
+# proot/chroot/Wine 以普通应用 uid 运行。
+allow untrusted_app ntsync_device:chr_file { open read write ioctl map getattr };
+
+# KernelSU / root 场景。
+allow su ntsync_device:chr_file { open read write ioctl map getattr };
+
+# 如果 ROM 使用版本化的 untrusted_app_* 域，并且你需要覆盖所有版本，
+# 可以把上面一行改成（确认 ROM 定义了该属性）：
+# allow untrusted_app_all ntsync_device:chr_file { open read write ioctl map getattr };
+# 如果还需要 shell 调试：
+# allow shell ntsync_device:chr_file { open read write ioctl map getattr };
