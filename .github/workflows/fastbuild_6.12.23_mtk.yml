@@ -12,13 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: 'KernelSU分支(BakaSU/FinaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
+        description: 'KernelSU分支(BakaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
         required: true
         type: choice
         default: 'bakasu'
         options:
           - 'bakasu'
-          - 'finasu'
           - 'sukisu'
           - 'ksunext'
           - 'ksu'
@@ -132,11 +131,6 @@ on:
           - 'KernelSU-Next/KernelSU-Next'
       ksunext_ref:
         description: 'KernelSU Next 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 dev-susfs 的最新代码)'
-        required: false
-        type: string
-        default: ''
-      finasu_ref:
-        description: 'FinaSU 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 dev 的最新代码)'
         required: false
         type: string
         default: ''
@@ -319,7 +313,6 @@ jobs:
           KSU_REF_IN: ${{ github.event.inputs.ksu_ref }}
           KSUNEXT_REPO_IN: ${{ github.event.inputs.ksunext_repo }}
           KSUNEXT_REF_IN: ${{ github.event.inputs.ksunext_ref }}
-          FINASU_REF_IN: ${{ github.event.inputs.finasu_ref }}
         run: |
           # 进入内核工作目录
           cd kernel_workspace
@@ -399,18 +392,6 @@ jobs:
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
             sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            echo "正在配置 FinaSU..."
-            FINASU_REF="${FINASU_REF_IN:-dev}"
-            curl -LSs "https://raw.githubusercontent.com/LyraVoid/FinaSU/${FINASU_REF}/kernel/setup.sh" | bash -s "${FINASU_REF}" || { echo "[-] FinaSU 安装脚本执行失败: ${FINASU_REF}"; exit 1; }
-            pin_ksu ./FinaSU "FinaSU" "${FINASU_REF_IN}"
-            # FinaSU 的 Kbuild 只在当前目录生效，kbuild 会重置子目录的 ccflags-y，这里统一改成 subdir-ccflags-y
-            sed -i 's/^ccflags-y +=/subdir-ccflags-y +=/' ./FinaSU/kernel/Kbuild
-            echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include' >> ./FinaSU/kernel/Kbuild
-            cd ./FinaSU
-            KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 30000)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           else
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
@@ -885,8 +866,6 @@ jobs:
             KSU_TYPENAME="SukiSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            KSU_TYPENAME="FinaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KSUNext"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
@@ -1010,8 +989,6 @@ jobs:
             KSU_TYPENAME="SukiSU Ultra"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            KSU_TYPENAME="FinaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KernelSU Next"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
@@ -1046,7 +1023,6 @@ jobs:
           - NTSync 支持：${{ github.event.inputs.ntsync_enable }}
           - NoMount 无挂载路径重定向支持：${{ github.event.inputs.nomount_enable }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
-          - FinaSU管理器下载：[FinaSU](https://github.com/LyraVoid/FinaSU/releases)
           - SukiSU Ultra管理器下载：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
           - KernelSU Next管理器下载：[KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           - KSU原版管理器下载：[KernelSU](https://github.com/tiann/KernelSU/releases)
