@@ -339,7 +339,21 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/LyraVoid/FinaSU/${FINASU_REF}/kernel/setup.sh" | bash -s "${FINASU_REF}" || { echo "[-] FinaSU 安装脚本执行失败: ${FINASU_REF}"; exit 1; }
           pin_ksu ./FinaSU "FinaSU" "${FINASU_REF_IN}"
           # FinaSU 的 O=out 构建中 src 已包含 srctree，Kbuild 再拼一次会导致 runner.c 路径重复
-          wget -q https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/finasu-o-out-kbuild.patch
+          cat > finasu-o-out-kbuild.patch <<'PATCH'
+          diff --git a/kernel/Kbuild b/kernel/Kbuild
+          index 1e96b9a..a468f16 100644
+          --- a/kernel/Kbuild
+          +++ b/kernel/Kbuild
+          @@ -103,7 +103,7 @@ endif
+           endif
+           ifndef KSU_KERNEL_DIR
+           ifeq ($(filter /%,$(src)),)
+          -KSU_KERNEL_DIR := $(srctree)/$(src)
+          +KSU_KERNEL_DIR := $(if $(VPATH),$(src),$(srctree)/$(src))
+           else
+           KSU_KERNEL_DIR := $(src)
+           endif
+          PATCH
           git -C ./FinaSU apply --ignore-whitespace "$PWD/finasu-o-out-kbuild.patch"
           # FinaSU 的 Kbuild 只在当前目录生效，kbuild 会重置子目录的 ccflags-y，这里统一改成 subdir-ccflags-y
           sed -i 's/^ccflags-y +=/subdir-ccflags-y +=/' ./FinaSU/kernel/Kbuild
