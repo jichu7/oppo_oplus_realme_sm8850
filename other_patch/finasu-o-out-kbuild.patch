@@ -1,0 +1,13 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+index 1e96b9a..a468f16 100644
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -103,7 +103,7 @@ endif
+ endif
+ ifndef KSU_KERNEL_DIR
+ ifeq ($(filter /%,$(src)),)
+-KSU_KERNEL_DIR := $(srctree)/$(src)
++KSU_KERNEL_DIR := $(if $(VPATH),$(src),$(srctree)/$(src))
+ else
+ KSU_KERNEL_DIR := $(src)
+ endif
