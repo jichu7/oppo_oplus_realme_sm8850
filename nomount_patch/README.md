@@ -4,10 +4,16 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 上游版本 | `NOMOUNT_BASE_VERSION = "22"` |
+| 上游版本 | `NOMOUNT_BASE_VERSION = "23"` |
 | 上游仓库 | https://github.com/maxsteeel/nomount |
 | 兼容内核 | 5.2 ~ 6.19（本仓库涉及 6.1.x / 6.12.x） |
 | 许可 | GPL-2.0（见 `LICENSE`，拷贝自上游 `kernel/LICENSE`） |
+
+## v2.3.0 更新要点
+
+- 修复单元素规则数组 OOB 读取、跨 superblock backing child 的空 dentry 解引用、positive whiteout/OOB readdir、rebind 类型不匹配。
+- blocked UID 在 opaque directory 下保留 native view；完善 kernfs superblock 的 xattr proxy。
+- xattr 权限/LSM 检查改到 backing inode；优化 leaf 复用、bucket 索引、RCU 与规则锁路径。
 
 ## 目录结构
 
