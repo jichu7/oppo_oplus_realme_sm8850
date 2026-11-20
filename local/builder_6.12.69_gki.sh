@@ -23,6 +23,16 @@ read -p "是否应用 lz4kd 补丁？(y/n，默认：n): " APPLY_LZ4KD
 APPLY_LZ4KD=${APPLY_LZ4KD:-n}
 read -p "是否启用网络功能增强优化配置？(y/n，默认：y): " APPLY_BETTERNET
 APPLY_BETTERNET=${APPLY_BETTERNET:-y}
+APPLY_LANDLOCK=${APPLY_LANDLOCK:-}
+if [[ -z "$APPLY_LANDLOCK" ]]; then
+  read -p "是否启用 Landlock LSM？(y/n，默认：n): " APPLY_LANDLOCK
+fi
+APPLY_LANDLOCK=${APPLY_LANDLOCK:-n}
+APPLY_NTSYNC=${APPLY_NTSYNC:-}
+if [[ -z "$APPLY_NTSYNC" ]]; then
+  read -p "是否启用 NTSync（Wine/Proton NT 同步驱动）？(y/n，默认：n): " APPLY_NTSYNC
+fi
+APPLY_NTSYNC=${APPLY_NTSYNC:-n}
 read -p "是否添加 BBR 等一系列拥塞控制算法？(y添加/n禁用/d默认，默认：n): " APPLY_BBR
 APPLY_BBR=${APPLY_BBR:-n}
 read -p "是否添加 Droidspaces 容器支持？(n禁用/s标准/e扩展，默认：n): " APPLY_DROIDSPACES
@@ -61,6 +71,8 @@ echo "应用 lz4&zstd 补丁: $APPLY_LZ4"
 echo "应用 lz4kd 补丁: $APPLY_LZ4KD"
 echo "应用网络功能增强优化配置: $APPLY_BETTERNET"
 echo "应用 BBR 等算法: $APPLY_BBR"
+echo "启用 Landlock LSM: $APPLY_LANDLOCK"
+echo "启用 NTSync: $APPLY_NTSYNC"
 echo "应用 Droidspaces 容器支持: $APPLY_DROIDSPACES"
 echo "启用ADIOS调度器: $APPLY_ADIOS"
 echo "启用Re-Kernel: $APPLY_REKERNEL"
@@ -186,6 +198,8 @@ if [[ "$APPLY_SUSFS" == [yY] ]]; then
   cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
   cd ./common
   patch -p1 -F 3 < 50_add_susfs_in_gki-android16-6.12.patch || true
+  # 6.12.69 的 show_smap() 已拆分出 __show_smap()，修正 SUSFS 模糊匹配插错位置
+  python3 "$SCRIPT_DIR/../other_patch/fix-susfs-task-mmu.py" fs/proc/task_mmu.c
 else
   echo ">>> 未开启susfs，跳过susfs补丁配置..."
 fi
@@ -243,6 +257,32 @@ fi
 # ===== 添加 defconfig 配置项 =====
 echo ">>> 添加 defconfig 配置项..."
 DEFCONFIG_FILE=./common/arch/arm64/configs/gki_defconfig
+
+# ===== 启用 Landlock LSM =====
+if [[ "$APPLY_LANDLOCK" == [yY] ]]; then
+  echo ">>> 正在启用 Landlock LSM..."
+  echo "CONFIG_SECURITY_LANDLOCK=y" >> "$DEFCONFIG_FILE"
+  echo "CONFIG_SECURITY_PATH=y" >> "$DEFCONFIG_FILE"
+  # 显式设置 LSM 顺序：Landlock 在最前，保留内核默认 LSM 列表；启用 BBG 时加入 baseband_guard
+  # 注意：SUSFS open redirect 会让 Landlock 看到重定向后的路径，避免策略路径重叠
+  if [[ "$APPLY_BBG" == [yY] ]]; then
+    echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,baseband_guard,smack,tomoyo,apparmor,ipe,bpf"' >> "$DEFCONFIG_FILE"
+  else
+    echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,ipe,bpf"' >> "$DEFCONFIG_FILE"
+  fi
+  echo ">>> 已启用 Landlock；请确认设备 boot 参数没有用 lsm= 覆盖内核配置。"
+fi
+
+# ===== 启用 NTSync =====
+if [[ "$APPLY_NTSYNC" == [yY] ]]; then
+  echo ">>> 正在启用 NTSync（Wine/Proton NT 同步）..."
+  cd common
+  git -c core.autocrlf=false apply --whitespace=nowarn "$SCRIPT_DIR/../other_patch/ntsync-6.14.patch"
+  cd ..
+  echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG_FILE"
+  echo ">>> 已启用 NTSync；/dev/ntsync 默认 0666，Android 侧需配置 ueventd/SELinux。"
+fi
+
 
 # 写入通用 SUSFS/KSU 配置
 echo "CONFIG_KSU=y" >> "$DEFCONFIG_FILE"
@@ -364,8 +404,6 @@ if [[ "$APPLY_DROIDSPACES" == [sSeE] ]]; then
   echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_NETFILTER_XT_TARGET_LOG=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> "$DEFCONFIG_FILE"
-  # 开启 NTSync
-  echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG_FILE"
   cd common
   # 应用 Droidspaces 容器必须补丁
   wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/fix_sysvipc_kabi_a16-6.12.patch
@@ -373,9 +411,6 @@ if [[ "$APPLY_DROIDSPACES" == [sSeE] ]]; then
   # 修补 oplus_bsp_midas 行为，避免开机崩溃
   wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/fix_oplus_bsp_midas.patch
   patch -p1 -F 3 < fix_oplus_bsp_midas.patch || true
-  # 应用 NTSync 补丁
-  wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/ntsync_compat_android16-6.12.patch
-  patch -p1 -F 3 < ntsync_compat_android16-6.12.patch || true
   cd ..
   if [[ "$APPLY_DROIDSPACES" == [eE] ]]; then
     echo "正在启用容器环境扩展支持..."
