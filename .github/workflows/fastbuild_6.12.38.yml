@@ -12,13 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: 'KernelSU分支(BakaSU/FinaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
+        description: 'KernelSU分支(BakaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
         required: true
         type: choice
         default: 'bakasu'
         options:
           - 'bakasu'
-          - 'finasu'
           - 'sukisu'
           - 'ksunext'
           - 'ksu'
@@ -53,7 +52,7 @@ on:
           - 'true'
           - 'default'
       droidspaces_enable:
-        description: '是否启用Droidspaces容器支持(轻量化的完整Linux容器支持;false关闭,standard开启容器+ntsync支持,extend开启更多测试支持项)'
+        description: '是否启用Droidspaces容器支持(轻量化的完整Linux容器支持;false关闭,standard开启容器支持,extend开启更多测试支持项)'
         required: true
         type: choice
         default: 'false'
@@ -86,6 +85,16 @@ on:
         required: true
         type: boolean
         default: 'true'
+      landlock_enable:
+        description: '是否启用 Landlock LSM（默认关闭；需要用户态主动调用 landlock_create_ruleset 才生效，且 boot lsm= 不能覆盖）'
+        required: true
+        type: boolean
+        default: false
+      ntsync_enable:
+        description: '是否启用 NTSync（Wine/Proton NT 同步驱动，默认关闭；Android 侧仍需 ueventd/SELinux 放行 /dev/ntsync）'
+        required: true
+        type: boolean
+        default: false
       ccache_update:
         description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
         required: true
@@ -122,11 +131,6 @@ on:
           - 'KernelSU-Next/KernelSU-Next'
       ksunext_ref:
         description: 'KernelSU Next 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 dev-susfs 的最新代码)'
-        required: false
-        type: string
-        default: ''
-      finasu_ref:
-        description: 'FinaSU 固定版本(Tag 或 Commit SHA; 留空则使用默认分支 dev 的最新代码)'
         required: false
         type: string
         default: ''
@@ -309,7 +313,6 @@ jobs:
           KSU_REF_IN: ${{ github.event.inputs.ksu_ref }}
           KSUNEXT_REPO_IN: ${{ github.event.inputs.ksunext_repo }}
           KSUNEXT_REF_IN: ${{ github.event.inputs.ksunext_ref }}
-          FINASU_REF_IN: ${{ github.event.inputs.finasu_ref }}
         run: |
           # 进入内核工作目录
           cd kernel_workspace
@@ -389,18 +392,6 @@ jobs:
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
             sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            echo "正在配置 FinaSU..."
-            FINASU_REF="${FINASU_REF_IN:-dev}"
-            curl -LSs "https://raw.githubusercontent.com/LyraVoid/FinaSU/${FINASU_REF}/kernel/setup.sh" | bash -s "${FINASU_REF}" || { echo "[-] FinaSU 安装脚本执行失败: ${FINASU_REF}"; exit 1; }
-            pin_ksu ./FinaSU "FinaSU" "${FINASU_REF_IN}"
-            # FinaSU 的 Kbuild 只在当前目录生效，kbuild 会重置子目录的 ccflags-y，这里统一改成 subdir-ccflags-y
-            sed -i 's/^ccflags-y +=/subdir-ccflags-y +=/' ./FinaSU/kernel/Kbuild
-            echo 'subdir-ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include' >> ./FinaSU/kernel/Kbuild
-            cd ./FinaSU
-            KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 30000)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           else
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
@@ -606,9 +597,6 @@ jobs:
             # 修补 oplus_bsp_sched_assist 数组越界访问导致的运行随机崩溃
             wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/droidspaces_patch/ddl_hit_hook.patch
             patch -p1 -F 3 < ddl_hit_hook.patch || true
-            # 应用 NTSync 补丁
-            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/droidspaces_patch/ntsync_compat_${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch
-            patch -p1 -F 3 < ntsync_compat_${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             # 开启 Droidspaces 容器所需内核支持
             echo "CONFIG_PID_NS=y" >> ./arch/arm64/configs/gki_defconfig
             echo "CONFIG_IPC_NS=y" >> ./arch/arm64/configs/gki_defconfig
@@ -626,8 +614,6 @@ jobs:
             #echo "CONFIG_FW_LOADER_COMPRESS=y" >> ./arch/arm64/configs/gki_defconfig
             #echo "CONFIG_BRIDGE_NETFILTER=y" >> ./arch/arm64/configs/gki_defconfig
             #echo "CONFIG_NF_TABLES=y" >> ./arch/arm64/configs/gki_defconfig
-            # 开启 NTSync
-            echo "CONFIG_NTSYNC=y" >> ./arch/arm64/configs/gki_defconfig
             if [[ "${{ github.event.inputs.droidspaces_enable }}" == "extend" ]]; then
               echo "正在启用容器环境扩展支持..."
               # 开启虚拟 HCI 设备支持
@@ -640,6 +626,31 @@ jobs:
               # echo "CONFIG_DRM_LINDROID_EVDI=y" >> ./arch/arm64/configs/gki_defconfig
             fi
           fi
+
+      - name: 启用 Landlock LSM
+        if: inputs.landlock_enable
+        run: |
+          echo "正在启用 Landlock LSM..."
+          cd kernel_workspace
+          echo "CONFIG_SECURITY_LANDLOCK=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SECURITY_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+          if [[ "${{ inputs.baseband_guard }}" == "true" ]]; then
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,baseband_guard,smack,tomoyo,apparmor,ipe,bpf"' >> ./common/arch/arm64/configs/gki_defconfig
+          else
+            echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,ipe,bpf"' >> ./common/arch/arm64/configs/gki_defconfig
+          fi
+          echo "已启用 Landlock；请确认 boot 参数没有 lsm= 覆盖。"
+
+      - name: 启用 NTSync
+        if: inputs.ntsync_enable
+        run: |
+          echo "正在启用 NTSync..."
+          cd kernel_workspace
+          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/ntsync-6.14.patch
+          cd common
+          git -c core.autocrlf=false apply --whitespace=nowarn ../ntsync-6.14.patch
+          cd ..
+          echo "CONFIG_NTSYNC=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 启用ADIOS IO调度器
         if: inputs.adios_enable
@@ -852,8 +863,6 @@ jobs:
             KSU_TYPENAME="SukiSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            KSU_TYPENAME="FinaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KSUNext"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
@@ -866,6 +875,23 @@ jobs:
           fi
           if [[ ${{ github.event.inputs.kpm_enable }} == 'true' ]]; then
             wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
+          fi
+          if [[ "${{ github.event.inputs.ntsync_enable }}" == "true" ]]; then
+            wget -O ntsync_rw.zip https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/ntsync-android/ntsync_rw.zip
+            cat >> anykernel.sh <<'NTSYNC_EOF'
+
+          # NTSync runtime module (optional, only present when ntsync_enable=true)
+          if [ -f "$AKHOME/ntsync_rw.zip" ]; then
+              ui_print "Installing NTSync RW module..."
+              if [ -f /data/adb/ksud ]; then
+                  /data/adb/ksud module install "$AKHOME/ntsync_rw.zip"
+              elif [ -f /data/adb/magisk/magisk ]; then
+                  /data/adb/magisk/magisk --install-module "$AKHOME/ntsync_rw.zip"
+              else
+                  ui_print "! Root manager not found; install ntsync_rw.zip manually after boot."
+              fi
+          fi
+          NTSYNC_EOF
           fi
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
@@ -904,6 +930,8 @@ jobs:
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
           echo "NoMount: ${{ github.event.inputs.nomount_enable }}" >> ./ak3.log
+          echo "Landlock: ${{ github.event.inputs.landlock_enable }}" >> ./ak3.log
+          echo "NTSync: ${{ github.event.inputs.ntsync_enable }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
       - name: 上传 Ccache 调试日志
@@ -958,8 +986,6 @@ jobs:
             KSU_TYPENAME="SukiSU Ultra"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
-          elif [[ ${{ github.event.inputs.ksu_type }} == "finasu" ]]; then
-            KSU_TYPENAME="FinaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KernelSU Next"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
@@ -992,8 +1018,7 @@ jobs:
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
           - NoMount 无挂载路径重定向支持：${{ github.event.inputs.nomount_enable }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
-          - FinaSU管理器下载：[FinaSU](https://github.com/LyraVoid/FinaSU/releases)
-          - SukiSU Ultra管理器下载：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
+                    - SukiSU Ultra管理器下载：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
           - KernelSU Next管理器下载：[KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           - KSU原版管理器下载：[KernelSU](https://github.com/tiann/KernelSU/releases)
           

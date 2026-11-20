@@ -106,15 +106,15 @@ on:
         type: string
         default: ''
       finasu_cert_size:
-        description: 'FinaSU 管理器 APK 签名 size（如 0x033b；留空使用 FinaSU Kbuild 默认值）'
+        description: 'FinaSU 管理器 APK 签名 size；默认对应 FinaSU v1.6.0 官方管理器（33194），换签名管理器时覆盖'
         required: false
         type: string
-        default: ''
+        default: '0x02cc'
       finasu_cert_hash:
-        description: 'FinaSU 管理器 APK 签名 SHA256（留空使用 FinaSU Kbuild 默认值）'
+        description: 'FinaSU 管理器 APK 签名 SHA256；默认对应 FinaSU v1.6.0 官方管理器（33194），换签名管理器时覆盖'
         required: false
         type: string
-        default: ''
+        default: '2d89b50aaf1db013c2b6738f973f48b62ea21a3a8d7216bfec3521065d448458'
 
 jobs:
   build:
