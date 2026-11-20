@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================
-# NoMount 内核补丁应用脚本（内核侧，上游 maxsteeel/nomount v23）
+# NoMount 内核补丁应用脚本（内核侧，上游 maxsteeel/nomount v2.3.1（wire v23））
 #
 # 用法: sh apply_nomount.sh [内核源码根目录]
 #       不传参数时默认为当前目录 "."
