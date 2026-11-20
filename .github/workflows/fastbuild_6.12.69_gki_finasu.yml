@@ -1,4 +1,4 @@
-name: (新版米/通用GKI) 6.12.69 GKI内核快速构建
+name: (新版米/通用GKI) 6.12.69 GKI内核快速构建（FinaSU 专用）
 
 env:
   TZ: Asia/Shanghai
@@ -457,6 +457,9 @@ jobs:
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
             cd ./common
             patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+            # 6.12.69 把 show_smap() 拆出了 __show_smap()，SUSFS 的 -F 3 模糊匹配会插错位置
+            wget -q https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/fix-susfs-task-mmu.py
+            python3 fix-susfs-task-mmu.py fs/proc/task_mmu.c
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
