@@ -61,6 +61,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      fs_extra_enable:
+        description: '是否启用 NTFS3 / SquashFS 文件系统支持（默认开启）'
+        required: true
+        type: boolean
+        default: true
       adios_enable:
         description: '是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
@@ -587,6 +592,22 @@ jobs:
           echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP_SET_LIST_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # nftables（并入网络功能增强）
+          echo "CONFIG_NF_TABLES=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_INET=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_IPV4=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_IPV6=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_ARP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_NETDEV=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NF_TABLES_BRIDGE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_MASQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_REDIR=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_CT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_LIMIT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_REJECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NFT_FIB_INET=y" >> ./common/arch/arm64/configs/gki_defconfig
           #启用 IPv6 网络地址转换
           echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -859,6 +880,18 @@ jobs:
           sudo rm -rf /usr/local/lib/android &
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
+          # 文件系统支持（独立开关）
+          if [[ "${{ inputs.fs_extra_enable }}" == "true" ]]; then
+          echo "CONFIG_NTFS3_FS=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NTFS3_LZX_XPRESS=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NTFS3_FS_POSIX_ACL=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS_XATTR=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS_ZLIB=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS_LZ4=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS_XZ=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SQUASHFS_ZSTD=y" >> ./arch/arm64/configs/gki_defconfig
+          fi
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig &&
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image KSU_REQUIRE_PREINIT=1
