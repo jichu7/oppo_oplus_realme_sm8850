@@ -42,6 +42,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      nomount_enable:
+        description: '是否集成 NoMount 无挂载路径重定向内核支持（编译进内核，需配合 NoMount 用户态模块使用）'
+        required: true
+        type: boolean
+        default: 'true'
       bbr_enable:
         description: "是否启用bbr算法(优化上行数据,对手机日用无太大意义甚至可能负优化;false关闭,true仅加入算法,default启用算法并设为默认)"
         required: true
@@ -335,6 +340,20 @@ jobs:
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/lz4kd.patch
           patch -p1 -F 3 < lz4kd.patch || true
           
+      - name: 启用 NoMount 内核支持
+        if: inputs.nomount_enable
+        run: |
+          echo "正在集成 NoMount 内核支持…"
+          cd kernel_workspace
+          mkdir -p nomount_patch/src
+          NOMOUNT_URL="https://github.com/${GITHUB_REPOSITORY}/raw/refs/heads/${GITHUB_REF_NAME}/nomount_patch"
+          wget -q "${NOMOUNT_URL}/apply_nomount.sh" -O nomount_patch/apply_nomount.sh
+          wget -q "${NOMOUNT_URL}/src/Kconfig" -O nomount_patch/src/Kconfig
+          wget -q "${NOMOUNT_URL}/src/Makefile" -O nomount_patch/src/Makefile
+          wget -q "${NOMOUNT_URL}/src/nomount.c" -O nomount_patch/src/nomount.c
+          wget -q "${NOMOUNT_URL}/src/nomount.h" -O nomount_patch/src/nomount.h
+          sh nomount_patch/apply_nomount.sh ./common
+          echo "CONFIG_NOMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
       - name: 添加SUSFS 配置项
         if: inputs.susfs_enable
         run: |
@@ -768,6 +787,7 @@ jobs:
           echo "KPM: ${{ github.event.inputs.kpm_enable }}" >> ./ak3.log
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
+          echo "NoMount: ${{ github.event.inputs.nomount_enable }}" >> ./ak3.log
           echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
           echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
           echo "Droidspaces: ${{ github.event.inputs.droidspaces_enable }}" >> ./ak3.log
@@ -852,6 +872,7 @@ jobs:
           - KPM支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
+          - NoMount 无挂载路径重定向支持：${{ github.event.inputs.nomount_enable }}
           - 网络功能增强：${{ github.event.inputs.better_net }}
           - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
           - Droidspaces 容器支持：${{ github.event.inputs.droidspaces_enable }}
