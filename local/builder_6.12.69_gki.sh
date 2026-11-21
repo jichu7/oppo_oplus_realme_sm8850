@@ -23,6 +23,8 @@ read -p "是否应用 lz4kd 补丁？(y/n，默认：n): " APPLY_LZ4KD
 APPLY_LZ4KD=${APPLY_LZ4KD:-n}
 read -p "是否启用网络功能增强优化配置？(y/n，默认：y): " APPLY_BETTERNET
 APPLY_BETTERNET=${APPLY_BETTERNET:-y}
+read -p "是否启用 NTFS3 / SquashFS 文件系统支持？(y/n，默认：y): " APPLY_FS_EXTRA
+APPLY_FS_EXTRA=${APPLY_FS_EXTRA:-y}
 APPLY_LANDLOCK=${APPLY_LANDLOCK:-}
 if [[ -z "$APPLY_LANDLOCK" ]]; then
   read -p "是否启用 Landlock LSM？(y/n，默认：n): " APPLY_LANDLOCK
@@ -70,6 +72,7 @@ echo "启用 KPM: $USE_PATCH_LINUX"
 echo "应用 lz4&zstd 补丁: $APPLY_LZ4"
 echo "应用 lz4kd 补丁: $APPLY_LZ4KD"
 echo "应用网络功能增强优化配置: $APPLY_BETTERNET"
+echo "应用 NTFS3/SquashFS 文件系统支持: $APPLY_FS_EXTRA"
 echo "应用 BBR 等算法: $APPLY_BBR"
 echo "启用 Landlock LSM: $APPLY_LANDLOCK"
 echo "启用 NTSync: $APPLY_NTSYNC"
@@ -257,6 +260,18 @@ fi
 # ===== 添加 defconfig 配置项 =====
 echo ">>> 添加 defconfig 配置项..."
 DEFCONFIG_FILE=./common/arch/arm64/configs/gki_defconfig
+# 文件系统支持（独立开关）
+if [[ "$APPLY_FS_EXTRA" == [yY] ]]; then
+echo "CONFIG_NTFS3_FS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NTFS3_LZX_XPRESS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NTFS3_FS_POSIX_ACL=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_XATTR=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_ZLIB=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_LZ4=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_XZ=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_ZSTD=y" >> "$DEFCONFIG_FILE"
+fi
 
 # ===== 启用 Landlock LSM =====
 if [[ "$APPLY_LANDLOCK" == [yY] ]]; then
@@ -363,6 +378,22 @@ if [[ "$APPLY_BETTERNET" == "y" || "$APPLY_BETTERNET" == "Y" ]]; then
   echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP_SET_LIST_SET=y" >> "$DEFCONFIG_FILE"
+# nftables（并入网络功能增强）
+echo "CONFIG_NF_TABLES=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_INET=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_IPV4=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_IPV6=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_ARP=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_NETDEV=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_BRIDGE=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_NAT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_MASQ=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_REDIR=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_CT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_LOG=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_LIMIT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_REJECT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_FIB_INET=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP6_NF_NAT=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> "$DEFCONFIG_FILE"
   #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译

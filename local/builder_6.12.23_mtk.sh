@@ -13,6 +13,16 @@ read -p "请输入自定义内核后缀（默认：android16-5-ge7f2a9832757-ab1
 CUSTOM_SUFFIX=${CUSTOM_SUFFIX:-android16-5-ge7f2a9832757-ab13799791-4k}
 read -p "是否启用susfs？(y/n，默认：y): " APPLY_SUSFS
 APPLY_SUSFS=${APPLY_SUSFS:-y}
+APPLY_LANDLOCK=${APPLY_LANDLOCK:-}
+if [[ -z "$APPLY_LANDLOCK" ]]; then
+  read -p "是否启用 Landlock LSM？(y/n，默认：n): " APPLY_LANDLOCK
+fi
+APPLY_LANDLOCK=${APPLY_LANDLOCK:-n}
+APPLY_NTSYNC=${APPLY_NTSYNC:-}
+if [[ -z "$APPLY_NTSYNC" ]]; then
+  read -p "是否启用 NTSync（Wine/Proton NT 同步驱动）？(y/n，默认：n): " APPLY_NTSYNC
+fi
+APPLY_NTSYNC=${APPLY_NTSYNC:-n}
 read -p "是否启用 KPM？(y-启用 KpatchNext独立kpm实现, n-关闭kpm，默认：n): " USE_PATCH_LINUX
 USE_PATCH_LINUX=${USE_PATCH_LINUX:-n}
 read -p "KSU分支版本(r=BakaSU, f=FinaSU, y=SukiSU Ultra, n=KernelSU Next, k=KSU, l=lkm模式(无内置KSU), 默认：r): " KSU_BRANCH
@@ -23,6 +33,8 @@ read -p "是否应用 lz4kd 补丁？(y/n，默认：n): " APPLY_LZ4KD
 APPLY_LZ4KD=${APPLY_LZ4KD:-n}
 read -p "是否启用网络功能增强优化配置？(y/n，默认：y): " APPLY_BETTERNET
 APPLY_BETTERNET=${APPLY_BETTERNET:-y}
+read -p "是否启用 NTFS3 / SquashFS 文件系统支持？(y/n，默认：y): " APPLY_FS_EXTRA
+APPLY_FS_EXTRA=${APPLY_FS_EXTRA:-y}
 read -p "是否添加 BBR 等一系列拥塞控制算法？(y添加/n禁用/d默认，默认：n): " APPLY_BBR
 APPLY_BBR=${APPLY_BBR:-n}
 read -p "是否添加 Droidspaces 容器支持？(n禁用/s标准/e扩展，默认：n): " APPLY_DROIDSPACES
@@ -56,10 +68,13 @@ echo "适用机型: $MANIFEST"
 echo "自定义内核后缀: -$CUSTOM_SUFFIX"
 echo "KSU分支版本: $KSU_TYPE"
 echo "启用susfs: $APPLY_SUSFS"
+echo "启用 Landlock LSM: $APPLY_LANDLOCK"
+echo "启用 NTSync: $APPLY_NTSYNC"
 echo "启用 KPM: $USE_PATCH_LINUX"
 echo "应用 lz4&zstd 补丁: $APPLY_LZ4"
 echo "应用 lz4kd 补丁: $APPLY_LZ4KD"
 echo "应用网络功能增强优化配置: $APPLY_BETTERNET"
+echo "应用 NTFS3/SquashFS 文件系统支持: $APPLY_FS_EXTRA"
 echo "应用 BBR 等算法: $APPLY_BBR"
 echo "应用 Droidspaces 容器支持: $APPLY_DROIDSPACES"
 echo "启用ADIOS调度器: $APPLY_ADIOS"
@@ -243,6 +258,18 @@ fi
 # ===== 添加 defconfig 配置项 =====
 echo ">>> 添加 defconfig 配置项..."
 DEFCONFIG_FILE=./common/arch/arm64/configs/gki_defconfig
+# 文件系统支持（独立开关）
+if [[ "$APPLY_FS_EXTRA" == [yY] ]]; then
+echo "CONFIG_NTFS3_FS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NTFS3_LZX_XPRESS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NTFS3_FS_POSIX_ACL=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_XATTR=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_ZLIB=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_LZ4=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_XZ=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_SQUASHFS_ZSTD=y" >> "$DEFCONFIG_FILE"
+fi
 
 # 写入通用 SUSFS/KSU 配置
 echo "CONFIG_KSU=y" >> "$DEFCONFIG_FILE"
@@ -265,6 +292,32 @@ if [[ "$APPLY_SUSFS" == [yY] ]]; then
 else
   echo "CONFIG_KSU_SUSFS=n" >> "$DEFCONFIG_FILE"
 fi
+
+# ===== 启用 Landlock LSM =====
+if [[ "$APPLY_LANDLOCK" == [yY] ]]; then
+  echo ">>> 正在启用 Landlock LSM..."
+  echo "CONFIG_SECURITY_LANDLOCK=y" >> "$DEFCONFIG_FILE"
+  echo "CONFIG_SECURITY_PATH=y" >> "$DEFCONFIG_FILE"
+  # 显式设置 LSM 顺序：Landlock 在最前，保留内核默认 LSM 列表；启用 BBG 时加入 baseband_guard
+  # 注意：SUSFS open redirect 会让 Landlock 看到重定向后的路径，避免策略路径重叠
+  if [[ "$APPLY_BBG" == [yY] ]]; then
+    echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,baseband_guard,smack,tomoyo,apparmor,ipe,bpf"' >> "$DEFCONFIG_FILE"
+  else
+    echo 'CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,smack,tomoyo,apparmor,ipe,bpf"' >> "$DEFCONFIG_FILE"
+  fi
+  echo ">>> 已启用 Landlock；请确认设备 boot 参数没有用 lsm= 覆盖内核配置。"
+fi
+
+# ===== 启用 NTSync =====
+if [[ "$APPLY_NTSYNC" == [yY] ]]; then
+  echo ">>> 正在启用 NTSync（Wine/Proton NT 同步）..."
+  cd common
+  git -c core.autocrlf=false apply --whitespace=nowarn "$SCRIPT_DIR/../other_patch/ntsync-6.14.patch"
+  cd ..
+  echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG_FILE"
+  echo ">>> 已启用 NTSync；/dev/ntsync 默认 0666，Android 侧需配置 ueventd/SELinux。"
+fi
+
 #添加对 Mountify (backslashxx/mountify) 模块的支持
 echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG_FILE"
 echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG_FILE"
@@ -323,6 +376,22 @@ if [[ "$APPLY_BETTERNET" == "y" || "$APPLY_BETTERNET" == "Y" ]]; then
   echo "CONFIG_IP_SET_HASH_NETPORT=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP_SET_LIST_SET=y" >> "$DEFCONFIG_FILE"
+# nftables（并入网络功能增强）
+echo "CONFIG_NF_TABLES=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_INET=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_IPV4=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_IPV6=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_ARP=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_NETDEV=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NF_TABLES_BRIDGE=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_NAT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_MASQ=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_REDIR=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_CT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_LOG=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_LIMIT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_REJECT=y" >> "$DEFCONFIG_FILE"
+echo "CONFIG_NFT_FIB_INET=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP6_NF_NAT=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> "$DEFCONFIG_FILE"
   #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译
@@ -364,8 +433,6 @@ if [[ "$APPLY_DROIDSPACES" == [sSeE] ]]; then
   echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_NETFILTER_XT_TARGET_LOG=y" >> "$DEFCONFIG_FILE"
   echo "CONFIG_NETFILTER_XT_MATCH_RECENT=y" >> "$DEFCONFIG_FILE"
-  # 开启 NTSync
-  echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG_FILE"
   cd common
   # 应用 Droidspaces 容器必须补丁
   wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/fix_sysvipc_kabi_a16-6.12.patch
@@ -373,9 +440,6 @@ if [[ "$APPLY_DROIDSPACES" == [sSeE] ]]; then
   # 修补 oplus_bsp_midas 行为，避免开机崩溃
   wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/fix_oplus_bsp_midas.patch
   patch -p1 -F 3 < fix_oplus_bsp_midas.patch || true
-  # 应用 NTSync 补丁
-  wget https://github.com/cctv18/oppo_oplus_realme_sm8850/raw/refs/heads/main/droidspaces_patch/ntsync_compat_android16-6.12.patch
-  patch -p1 -F 3 < ntsync_compat_android16-6.12.patch || true
   cd ..
   if [[ "$APPLY_DROIDSPACES" == [eE] ]]; then
     echo "正在启用容器环境扩展支持..."
