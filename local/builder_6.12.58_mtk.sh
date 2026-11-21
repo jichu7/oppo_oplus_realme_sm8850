@@ -21,6 +21,8 @@ read -p "是否应用 lz4 1.10.0 & zstd 1.5.7 补丁？(y/n，默认：y): " APP
 APPLY_LZ4=${APPLY_LZ4:-y}
 read -p "是否应用 lz4kd 补丁？(y/n，默认：n): " APPLY_LZ4KD
 APPLY_LZ4KD=${APPLY_LZ4KD:-n}
+read -p "是否集成 NoMount 内核支持(可隐藏模块挂载痕迹, 需配合 NoMount 用户态模块; y/n, 默认y): " APPLY_NOMOUNT
+APPLY_NOMOUNT=${APPLY_NOMOUNT:-y}
 read -p "是否启用网络功能增强优化配置？(y/n，默认：y): " APPLY_BETTERNET
 APPLY_BETTERNET=${APPLY_BETTERNET:-y}
 read -p "是否添加 BBR 等一系列拥塞控制算法？(y添加/n禁用/d默认，默认：n): " APPLY_BBR
@@ -55,6 +57,7 @@ echo "启用susfs: $APPLY_SUSFS"
 echo "启用 KPM: $USE_PATCH_LINUX"
 echo "应用 lz4&zstd 补丁: $APPLY_LZ4"
 echo "应用 lz4kd 补丁: $APPLY_LZ4KD"
+echo "NoMount 支持: $APPLY_NOMOUNT"
 echo "应用网络功能增强优化配置: $APPLY_BETTERNET"
 echo "应用 BBR 等算法: $APPLY_BBR"
 echo "应用 Droidspaces 容器支持: $APPLY_DROIDSPACES"
@@ -206,6 +209,22 @@ if [[ "$APPLY_LZ4KD" == "y" || "$APPLY_LZ4KD" == "Y" ]]; then
 else
   echo ">>> 跳过 LZ4KD 补丁..."
   cd "$WORKDIR/kernel_workspace"
+fi
+
+# ===== NoMount 内核支持 =====
+if [[ "$APPLY_NOMOUNT" == [yY] ]]; then
+  echo ">>> 集成 NoMount 内核支持..."
+  cd "$WORKDIR/kernel_workspace"
+  NOMOUNT_APPLY="$SCRIPT_DIR/../nomount_patch/apply_nomount.sh"
+  if [ ! -f "$NOMOUNT_APPLY" ]; then
+    echo ">>> 未找到 $NOMOUNT_APPLY ，请确认仓库根目录包含 nomount_patch/" >&2
+    exit 1
+  fi
+  sh "$NOMOUNT_APPLY" ./common
+  echo "CONFIG_NOMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+  echo ">>> NoMount 集成完成"
+else
+  echo ">>> 跳过 NoMount 集成"
 fi
 
 # ===== 添加 defconfig 配置项 =====
@@ -515,6 +534,10 @@ if [[ "$APPLY_REKERNEL" == "y" || "$APPLY_REKERNEL" == "Y" ]]; then
 fi
 if [[ "$APPLY_BBG" == "y" || "$APPLY_BBG" == "Y" ]]; then
   ZIP_NAME="${ZIP_NAME}-bbg"
+fi
+
+if [[ "$APPLY_NOMOUNT" == [yY] ]]; then
+  ZIP_NAME="${ZIP_NAME}-nomount"
 fi
 
 ZIP_NAME="${ZIP_NAME}-v$(date +%Y%m%d).zip"
