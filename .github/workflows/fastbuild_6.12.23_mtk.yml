@@ -308,7 +308,19 @@ jobs:
             cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
             cd ./common
-            patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+            PATCH_FILE=50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch
+            # 新版 ACK 16K 内核把 vma_pages() 改成了 vma_data_pages()，补丁上下文对不上时
+            # patch 会带 fuzz 把代码块盲插到错误函数里（编译期才报错），所以先对齐到源码实际写法
+            if grep -q 'vma_data_pages(' fs/proc/task_mmu.c && grep -q 'if (!vma_pages(vma))' "$PATCH_FILE"; then
+              sed -i 's/if (!vma_pages(vma))/if (!vma_data_pages(vma))/' "$PATCH_FILE"
+              echo "SUSFS 补丁上下文已对齐源码: vma_pages -> vma_data_pages"
+            fi
+            # 收紧 fuzz：不再允许整段上下文失配的盲插，失败立即中断并打印 rejects
+            patch -p1 -F 1 < "$PATCH_FILE" || {
+              echo "::error::SUSFS 补丁应用失败，请检查以下 rejects"
+              find . -name '*.rej' -print -exec cat {} \;
+              exit 1
+            }
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
