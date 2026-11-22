@@ -354,12 +354,20 @@ jobs:
               sed -i 's/if (!vma_pages(vma))/if (!vma_data_pages(vma))/' "$PATCH_FILE"
               echo "SUSFS 补丁上下文已对齐源码: vma_pages -> vma_data_pages"
             fi
-            # 收紧 fuzz：不再允许整段上下文失配的盲插，失败立即中断并打印 rejects
-            patch -p1 -F 1 < "$PATCH_FILE" || {
-              echo "::error::SUSFS 补丁应用失败，请检查以下 rejects"
-              find . -name '*.rej' -print -exec cat {} \;
-              exit 1
-            }
+            # 收紧 fuzz：不再允许整段上下文失配的盲插
+            # 老版本 SUSFS 补丁(如 2.3.0)里只做 include 插入的 hunk，会因新基线在同一位置新增
+            # 了 #include <linux/dma-buf.h> 而上下文中间不匹配(patch 无法自己定位)，这类
+            # 失配用自愈脚本按源码实际位置补插；其它类型的失配仍然直接报错
+            wget -q "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/susfs_rej_repair.py" -O ../susfs_rej_repair.py || true
+            if ! patch -p1 -F 1 < "$PATCH_FILE"; then
+              if command -v python3 >/dev/null 2>&1 && python3 ../susfs_rej_repair.py .; then
+                echo "SUSFS 补丁的 include 段落已按源码实际位置补插，继续构建"
+              else
+                echo "::error::SUSFS 补丁应用失败，请检查以下 rejects"
+                find . -name '*.rej' -print -exec cat {} \;
+                exit 1
+              fi
+            fi
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
@@ -809,9 +817,9 @@ jobs:
             wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
           fi
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
+            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
           else
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
+            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}_${{ env.KERNEL_NAME }}.zip
           fi
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
