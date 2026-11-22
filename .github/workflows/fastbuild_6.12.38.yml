@@ -27,6 +27,15 @@ on:
         required: true
         type: boolean
         default: 'true'
+      susfs_version:
+        description: 'SUSFS 版本(按上游 SUSFS 版本号选择; latest=跟随上游最新提交; 2.4.0=已适配多基线补丁的提交; 2.3.0=已验证稳定版)'
+        required: true
+        type: choice
+        default: 'latest'
+        options:
+          - 'latest'
+          - '2.4.0'
+          - '2.3.0'
       kpm_enable:
         description: '是否开启kpm(使用KpatchNext独立实现kpm(支持任意KSU/面具环境); 不需要可保持默认关闭)'
         required: true
@@ -303,7 +312,37 @@ jobs:
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
             echo "正在添加susfs补丁..."
-            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+            SUSFS_VER='${{ github.event.inputs.susfs_version }}'
+            SUSFS_VER="${SUSFS_VER:-latest}"
+            SUSFS_BRANCH="oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}"
+            # 版本号 -> 上游固定提交(SUSFS 上游没给 2.x 打 tag；版本号取自 kernel_patches/include/linux/susfs.h 的 SUSFS_VERSION)
+            # 2.4.0 = 上游 2ea91d1c37(适配 6.12 多基线，2026-11-17)；2.3.0 = 上游 456ea36dd4(2026-08-29)
+            case "$SUSFS_VER" in
+              latest) SUSFS_REF="" ; SUSFS_LABEL="latest(跟随上游分支 $SUSFS_BRANCH)" ;;
+              2.4.0)  SUSFS_REF=2ea91d1c37cc974b683d6ffbc2e913c3b728d1f5 ; SUSFS_LABEL="SUSFS 2.4.0" ;;
+              2.3.0)  SUSFS_REF=456ea36dd442fdbf05e15d3c962753d3130cec21 ; SUSFS_LABEL="SUSFS 2.3.0" ;;
+              *)      SUSFS_REF="$SUSFS_VER" ; SUSFS_LABEL="自定义版本 $SUSFS_VER" ;;
+            esac
+            echo "SUSFS 版本: $SUSFS_LABEL"
+            if [[ -z "$SUSFS_REF" ]]; then
+              git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b "$SUSFS_BRANCH"
+            else
+              git init -q susfs4ksu
+              git -C susfs4ksu remote add origin https://github.com/cctv18/susfs4oki.git
+              if ! git -C susfs4ksu fetch -q --depth=1 origin "$SUSFS_REF"; then
+                # 短 SHA 不是有效 ref，先用 GitHub API 解析成完整 commit SHA 再拉取
+                SUSFS_SHA=$(curl -fsSL "https://api.github.com/repos/cctv18/susfs4oki/commits/$SUSFS_REF" 2>/dev/null | grep -o '"sha": *"[0-9a-f]\{40\}"' | head -n1 | cut -d'"' -f4)
+                [[ -n "$SUSFS_SHA" ]] || { echo "::error::无法解析 SUSFS 版本 $SUSFS_REF (分支/标签/SHA 无效)"; exit 1; }
+                git -C susfs4ksu fetch -q --depth=1 origin "$SUSFS_SHA" || { echo "::error::无法获取 SUSFS 提交 $SUSFS_SHA"; exit 1; }
+              fi
+              git -C susfs4ksu checkout -q FETCH_HEAD
+            fi
+            SUSFS_FOUND=$(grep -m1 -o 'SUSFS_VERSION "v[0-9.]*"' susfs4ksu/kernel_patches/include/linux/susfs.h | cut -d'"' -f2)
+            echo "SUSFS 实际版本/提交: ${SUSFS_FOUND:-未知} @ $(git -C susfs4ksu rev-parse --short HEAD)"
+            if [[ ! -f "susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch" ]]; then
+              echo "::error::该 SUSFS 版本不含 android16-6.12 补丁，请换一个版本"
+              exit 1
+            fi
             cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
             cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
@@ -796,6 +835,7 @@ jobs:
           echo "KSU Branch: ${KSU_TYPENAME}" >> ./ak3.log
           echo "KSU Ver: ${KSUVER}" >> ./ak3.log
           echo "susfs: ${{ github.event.inputs.susfs_enable }}" >> ./ak3.log
+          echo "SUSFS Ver: ${{ github.event.inputs.susfs_version }}" >> ./ak3.log
           echo "KPM: ${{ github.event.inputs.kpm_enable }}" >> ./ak3.log
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
@@ -881,6 +921,7 @@ jobs:
           - 机型：欧加真骁龙8E Gen5通用 ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }} 内核（基于一加Ace6t ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }} 版官方源码）
           - KSU分支：${{ env.KSU_TYPENAME }}
           - susfs支持：${{ github.event.inputs.susfs_enable }}
+          - susfs版本：${{ github.event.inputs.susfs_version }}
           - KPM支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
